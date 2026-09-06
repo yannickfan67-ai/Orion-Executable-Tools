@@ -1,0 +1,22 @@
+.entry main
+.section code
+main:
+    movi r0, 640
+    movi r1, 360
+    syscall window, @title
+    movi r0, 0x132238
+    syscall clear
+    movi r0, 32
+    movi r1, 40
+    syscall text, @message
+    syscall present
+    syscall log, @logline
+    halt
+
+.section rodata
+title:
+    .string "Hello Orion"
+message:
+    .string "Hello from a real .orx application."
+logline:
+    .string "Hello Orion started successfully."
