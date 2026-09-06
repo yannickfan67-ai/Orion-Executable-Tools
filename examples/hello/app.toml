@@ -1,0 +1,7 @@
+name = "Hello Orion"
+id = "dev.orion.hello"
+version = "0.1.0"
+abi = 1
+source = "main.oasm"
+type = "gui"
+permissions = ["graphics"]
