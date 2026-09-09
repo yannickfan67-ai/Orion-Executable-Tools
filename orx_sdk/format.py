@@ -22,9 +22,11 @@ PERMISSIONS = {
     "network": 1 << 5,
     "audio": 1 << 6,
 }
+KNOWN_PERMISSION_MASK = sum(PERMISSIONS.values())
 
 FLAG_GUI = 1 << 0
 FLAG_CONSOLE = 1 << 1
+KNOWN_FLAG_MASK = FLAG_GUI | FLAG_CONSOLE
 
 
 def align(value: int, alignment: int = 16) -> int:
@@ -42,6 +44,8 @@ def permission_mask(names: list[str]) -> int:
 
 
 def permission_names(mask: int) -> list[str]:
+    if mask & ~KNOWN_PERMISSION_MASK:
+        raise ValueError(f"unknown ORX permission bits: 0x{mask & ~KNOWN_PERMISSION_MASK:x}")
     return [name for name, bit in PERMISSIONS.items() if mask & bit]
 
 
@@ -87,8 +91,16 @@ class OrxHeader:
             raise ValueError(f"unsupported Orion App ABI {self.abi_version}")
         if self.machine != MACHINE_VM64:
             raise ValueError(f"unsupported ORX machine {self.machine}")
+        if self.flags & ~KNOWN_FLAG_MASK:
+            raise ValueError(f"unknown ORX flag bits: 0x{self.flags & ~KNOWN_FLAG_MASK:x}")
+        if self.permissions & ~KNOWN_PERMISSION_MASK:
+            raise ValueError(f"unknown ORX permission bits: 0x{self.permissions & ~KNOWN_PERMISSION_MASK:x}")
         if self.file_size != len(data):
             raise ValueError(f"file size mismatch: header={self.file_size} actual={len(data)}")
+        if not self.code_size or self.code_size % 8:
+            raise ValueError("code section must be a non-empty multiple of 8 bytes")
+
+        intervals: list[tuple[int, int, str]] = []
         for name, off, size in (
             ("code", self.code_offset, self.code_size),
             ("rodata", self.rodata_offset, self.rodata_size),
@@ -97,8 +109,16 @@ class OrxHeader:
         ):
             if size == 0:
                 continue
-            if off < HEADER_SIZE or off + size > len(data):
+            if off < HEADER_SIZE or off > len(data) or size > len(data) - off:
                 raise ValueError(f"{name} section is out of file bounds")
+            if off % 16:
+                raise ValueError(f"{name} section is not 16-byte aligned")
+            intervals.append((off, off + size, name))
+        intervals.sort()
+        for (_, previous_end, previous_name), (off, _, name) in zip(intervals, intervals[1:]):
+            if off < previous_end:
+                raise ValueError(f"{name} section overlaps {previous_name} section")
+
         if self.entry >= self.code_size or self.entry % 8:
             raise ValueError("entry point is outside code or not instruction-aligned")
         payload = data[HEADER_SIZE:]
@@ -115,6 +135,10 @@ def pack_orx(*, code: bytes, rodata: bytes, metadata: dict, entry: int,
         raise ValueError("ORX VM code must be a non-empty multiple of 8 bytes")
     if entry < 0 or entry >= len(code) or entry % 8:
         raise ValueError("invalid ORX entry point")
+    if permissions & ~KNOWN_PERMISSION_MASK:
+        raise ValueError(f"unknown ORX permission bits: 0x{permissions & ~KNOWN_PERMISSION_MASK:x}")
+    if flags & ~KNOWN_FLAG_MASK:
+        raise ValueError(f"unknown ORX flag bits: 0x{flags & ~KNOWN_FLAG_MASK:x}")
     meta = json.dumps(metadata, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
     code_off = align(HEADER_SIZE)
